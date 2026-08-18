@@ -1,85 +1,83 @@
 import csv
 import os
-import re
 from firecrawl import FirecrawlApp
 
 app = FirecrawlApp(api_key=os.getenv("FIRECRAWL_API_KEY", ""))
 
 def run_scrapers():
-    print("Starting Firecrawl cloud scraper with prices & improved link parsing...")
+    print("Starting AI-powered extraction scraper...")
     master_listings = []
 
-    # 1. HDD BROKER SCRAPER
-    try:
-        print("Scraping HDD Broker...")
-        hdd_res = app.scrape_url("https://www.hddbroker.com/listings/search", params={'formats': ['markdown']})
-        markdown_text = hdd_res.get('markdown', '')
+    # Schema definition telling Firecrawl exactly what fields to extract
+    json_schema = {
+        "type": "object",
+        "properties": {
+            "listings": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string"},
+                        "price": {"type": "string"},
+                        "url": {"type": "string"}
+                    },
+                    "required": ["title", "url"]
+                }
+            }
+        }
+    }
 
-        # Extract items line by line from HDD Broker markdown output
-        for line in markdown_text.split('\n'):
-            if "Ref" in line or "Vermeer" in line or "Ditch Witch" in line:
-                ref_match = re.search(r'(\d{4,5})', line)
-                price_match = re.search(r'\$[\d,]+', line)
-                
-                if ref_match:
-                    ref_id = ref_match.group(1)
-                    title = re.sub(r'[#\*\|]', '', line).strip()
-                    # Clean up price if found
-                    price = price_match.group(0) if price_match else "Call for Price"
-                    
-                    # Direct link structure for HDD Broker items
-                    clean_url = f"https://www.hddbroker.com/en/listings/view.php?ref={ref_id}"
-
-                    if not any(item['URL'] == clean_url for item in master_listings):
-                        master_listings.append({
-                            "Source": "HDD Broker",
-                            "Title": title[:80],  # Keep title concise
-                            "Price": price,
-                            "URL": clean_url
-                        })
-    except Exception as e:
-        print(f"Error scraping HDD Broker: {e}")
-
-    # 2. MACHINERY TRADER & EQUIPMENT TRADER
-    other_sources = [
+    sources = [
+        ("HDD Broker", "https://www.hddbroker.com/listings/search"),
         ("Machinery Trader", "https://www.machinerytrader.com/listings/search?Category=1031"),
         ("Equipment Trader", "https://www.equipmenttrader.com/Directional-Drill/equipment-for-sale?category=Directional%20Drill%7C644247801")
     ]
 
-    for source, url in other_sources:
+    for source_name, target_url in sources:
+        print(f"Extracting structured data from {source_name}...")
         try:
-            print(f"Scraping {source}...")
-            res = app.scrape_url(url, params={'formats': ['markdown', 'links']})
-            markdown_text = res.get('markdown', '')
-            links = res.get('links', [])
+            # Use Firecrawl AI Extraction
+            res = app.scrape_url(
+                target_url,
+                params={
+                    'formats': ['extract'],
+                    'extract': {
+                        'schema': json_schema,
+                        'prompt': "Extract all equipment listings with their full title, price (or 'Call for Price' if unlisted), and absolute URL link."
+                    }
+                }
+            )
 
-            # Extract prices and links
-            for link in links:
-                if "/listing/" in link.lower() or "directional-drill" in link.lower() or "listing" in link.lower():
-                    # Parse title from link slug
-                    title_slug = link.split('/')[-1].split('?')[0].replace('-', ' ').title()
-                    if len(title_slug) > 5 and not any(item['URL'] == link for item in master_listings):
-                        
-                        # Look for price near the title in markdown if available
-                        price_match = re.search(r'\$[\d,]{4,}', markdown_text)
-                        price = price_match.group(0) if price_match else "Call for Price"
+            extracted_data = res.get('extract', {}).get('listings', [])
 
+            for item in extracted_data:
+                title = item.get('title', 'Unknown Equipment').strip()
+                price = item.get('price', 'Call for Price').strip()
+                url = item.get('url', '').strip()
+
+                if url:
+                    # Fix relative URLs for HDD Broker if necessary
+                    if source_name == "HDD Broker" and not url.startswith("http"):
+                        url = f"https://www.hddbroker.com{url}"
+
+                    if not any(entry['URL'] == url for entry in master_listings):
                         master_listings.append({
-                            "Source": source,
-                            "Title": title_slug[:80],
-                            "Price": price,
-                            "URL": link
+                            "Source": source_name,
+                            "Title": title,
+                            "Price": price if price else "Call for Price",
+                            "URL": url
                         })
-        except Exception as e:
-            print(f"Error scraping {source}: {e}")
 
-    # Save to CSV
+        except Exception as e:
+            print(f"Error extracting from {source_name}: {e}")
+
+    # Save structured results to CSV
     with open('all_listings.csv', mode='w', newline='', encoding='utf-8') as file:
         writer = csv.DictWriter(file, fieldnames=["Source", "Title", "Price", "URL"])
         writer.writeheader()
         writer.writerows(master_listings)
 
-    print(f"Done! Saved {len(master_listings)} listings to 'all_listings.csv'.")
+    print(f"Extraction complete! Saved {len(master_listings)} listings.")
 
 if __name__ == "__main__":
     run_scrapers()
