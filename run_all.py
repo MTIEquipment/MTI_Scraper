@@ -6,46 +6,33 @@ from firecrawl import FirecrawlApp
 app = FirecrawlApp(api_key=os.getenv("FIRECRAWL_API_KEY", ""))
 
 def run_scrapers():
-    print("Starting scraper execution...")
+    print("Starting Firecrawl cloud scraper...")
     master_listings = []
 
     # 1. HDD BROKER SCRAPER
     try:
         print("Scraping HDD Broker...")
-        hdd_res = app.scrape_url("https://www.hddbroker.com/listings/search", params={'formats': ['markdown', 'links']})
-        
-        # Pull direct listing links from Firecrawl response
-        for link in hdd_res.get('links', []):
-            if "ref=" in link.lower() or "/view.php" in link.lower():
-                # Extract ref number
-                ref_match = re.search(r'ref=(\d+)', link, re.IGNORECASE)
-                if ref_match:
-                    ref_id = ref_match.group(1)
-                    clean_url = f"https://www.hddbroker.com/en/listings/view.php?ref={ref_id}"
-                    
-                    if not any(item['URL'] == clean_url for item in master_listings):
-                        master_listings.append({
-                            "Source": "HDD Broker",
-                            "Title": f"HDD Rig Ref #{ref_id}",
-                            "URL": clean_url
-                        })
+        hdd_res = app.scrape_url("https://www.hddbroker.com/listings/search", params={'formats': ['markdown']})
+        markdown_text = hdd_res.get('markdown', '')
 
-        # Fallback: Parse markdown text if links array was filtered
-        if not master_listings:
-            markdown_text = hdd_res.get('markdown', '')
-            matches = re.findall(r'\[([^\]]+)\]\(([^\)]*ref=(\d+)[^\)]*)\)', markdown_text, re.IGNORECASE)
-            for title, raw_url, ref_id in matches:
-                clean_url = f"https://www.hddbroker.com/en/listings/view.php?ref={ref_id}"
+        # Extract [Title](URL) pattern from Markdown directly
+        matches = re.findall(r'\[([^\]]+)\]\((https?://[^\)]+)\)', markdown_text)
+        
+        for title, raw_url in matches:
+            # Match HDD Broker listings that contain reference IDs or equipment keywords
+            if "hddbroker.com" in raw_url and ("ref=" in raw_url or "view" in raw_url or "listings" in raw_url):
+                # Ensure HTTPS and remove trailing parameters
+                clean_url = raw_url.replace("http://", "https://")
                 if not any(item['URL'] == clean_url for item in master_listings):
                     master_listings.append({
                         "Source": "HDD Broker",
-                        "Title": title.strip(),
+                        "Title": title.strip().replace('\n', ' '),
                         "URL": clean_url
                     })
     except Exception as e:
         print(f"Error scraping HDD Broker: {e}")
 
-    # 2. OTHER SOURCES
+    # 2. MACHINERY TRADER & EQUIPMENT TRADER
     other_sources = [
         ("Machinery Trader", "https://www.machinerytrader.com/listings/search?Category=1031"),
         ("Equipment Trader", "https://www.equipmenttrader.com/Directional-Drill/equipment-for-sale?category=Directional%20Drill%7C644247801")
@@ -67,13 +54,13 @@ def run_scrapers():
         except Exception as e:
             print(f"Error scraping {source}: {e}")
 
-    # Save output CSV
+    # Save to CSV
     with open('all_listings.csv', mode='w', newline='', encoding='utf-8') as file:
         writer = csv.DictWriter(file, fieldnames=["Source", "Title", "URL"])
         writer.writeheader()
         writer.writerows(master_listings)
 
-    print(f"Scrape completed successfully. {len(master_listings)} total items saved.")
+    print(f"Successfully updated 'all_listings.csv' with {len(master_listings)} total items.")
 
 if __name__ == "__main__":
     run_scrapers()
