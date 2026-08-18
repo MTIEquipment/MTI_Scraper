@@ -1,0 +1,4 @@
+flask
+apscheduler
+gunicorn
+firecrawl-py
