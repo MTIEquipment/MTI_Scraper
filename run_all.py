@@ -1,56 +1,48 @@
-import asyncio
 import csv
 import os
-import subprocess
+from firecrawl import FirecrawlApp
 
+# Initialize Firecrawl with your API key
+# Pass FIRECRAWL_API_KEY as an Environment Variable in Render
+app = FirecrawlApp(api_key=os.getenv("FIRECRAWL_API_KEY", "your_firecrawl_api_key_here"))
 
 def run_scrapers():
-    print("Starting master scraper suite...")
-
-    # Run each script
-    subprocess.run(["python", "test_scraper.py"])
-    subprocess.run(["python", "machinery_trader.py"])
-    subprocess.run(["python", "equipment_trader.py"])
-
+    print("Starting Firecrawl cloud scraping suite...")
     master_listings = []
 
-    # Read and combine CSVs
-    files = [
-        ("HDD Broker", "hdd_listings.csv"),
-        ("Machinery Trader", "machinery_trader_listings.csv"),
-        ("Equipment Trader", "equipment_trader_listings.csv"),
+    urls = [
+        ("HDD Broker", "https://www.hddbroker.com/listings/search"),
+        ("Machinery Trader", "https://www.machinerytrader.com/listings/search?Category=1031"),
+        ("Equipment Trader", "https://www.equipmenttrader.com/Directional-Drill/equipment-for-sale?category=Directional%20Drill%7C644247801")
     ]
 
-    for source, filename in files:
-        if os.path.exists(filename):
-            with open(filename, mode="r", encoding="utf-8") as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    # Filter out header feedback links
-                    if "feedback" not in row["URL"].lower():
-                        master_listings.append(
-                            {
-                                "Source": source,
-                                "Title": row["Title"],
-                                "URL": row["URL"],
-                            }
-                        )
+    for source, url in urls:
+        print(f"Scraping {source} via Firecrawl...")
+        try:
+            # Scrape page and extract markdown/links
+            scrape_result = app.scrape_url(url, params={'formats': ['markdown', 'links']})
+            links = scrape_result.get('links', [])
 
-    # Write combined file
-    with open(
-        "all_listings.csv", mode="w", newline="", encoding="utf-8"
-    ) as file:
-        writer = csv.DictWriter(
-            file, fieldnames=["Source", "Title", "URL"]
-        )
+            for link in links:
+                if "/listing/" in link.lower() or "directional-drill" in link.lower():
+                    # Clean display title from URL structure
+                    title_part = link.split('/')[-1].replace('-', ' ').title()
+                    if len(title_part) > 5 and not any(item['URL'] == link for item in master_listings):
+                        master_listings.append({
+                            "Source": source,
+                            "Title": title_part,
+                            "URL": link
+                        })
+        except Exception as e:
+            print(f"Error scraping {source}: {e}")
+
+    # Save to master CSV
+    with open('all_listings.csv', mode='w', newline='', encoding='utf-8') as file:
+        writer = csv.DictWriter(file, fieldnames=["Source", "Title", "URL"])
         writer.writeheader()
         writer.writerows(master_listings)
 
-    print(
-        f"\nSUCCESS! Combined {len(master_listings)} total listings into"
-        " 'all_listings.csv'"
-    )
-
+    print(f"\nSUCCESS! Aggregated {len(master_listings)} listings into 'all_listings.csv'")
 
 if __name__ == "__main__":
     run_scrapers()
